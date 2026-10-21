@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.exe
+.DS_Store
+build/.sea/
+build/package-lock.json
+*.log
+build/offline/
+.git-rewrite/
+.git-old/

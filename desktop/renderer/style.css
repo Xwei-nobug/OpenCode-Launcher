@@ -1,0 +1,983 @@
+/* ------------------------------------------------------------------ base --- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --panel-2: #fbfbfd;
+  --border: #e3e6ec;
+  --border-strong: #d3d8e1;
+  --text: #1b1f27;
+  --muted: #6b7280;
+  --faint: #98a0ad;
+  --accent: #4f6ef7;
+  --accent-hover: #4360e6;
+  --accent-weak: #eef1fe;
+  --danger: #d64545;
+  --danger-weak: #fdeeee;
+  --ok: #1f9d61;
+  --ok-weak: #e9f7f0;
+  --warn: #b8791a;
+  --shadow: 0 1px 2px rgba(20, 24, 33, 0.05), 0 4px 14px rgba(20, 24, 33, 0.04);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --mono: "Cascadia Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+}
+
+[data-theme="dark"] {
+  --bg: #13161b;
+  --panel: #1b1f26;
+  --panel-2: #1f242c;
+  --border: #2a303a;
+  --border-strong: #363e4a;
+  --text: #e7eaf0;
+  --muted: #98a2b1;
+  --faint: #6f7987;
+  --accent: #6d87ff;
+  --accent-hover: #7f96ff;
+  --accent-weak: #232a3f;
+  --danger: #ef6b6b;
+  --danger-weak: #3a2327;
+  --ok: #45c488;
+  --ok-weak: #1d3228;
+  --warn: #d8a24a;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 6px 18px rgba(0, 0, 0, 0.28);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13.5px/1.5 "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+h1,
+h2,
+h3,
+p,
+ul {
+  margin: 0;
+}
+
+ul {
+  padding: 0;
+  list-style: none;
+}
+
+/* An explicit display on .view would otherwise beat the hidden attribute. */
+[hidden] {
+  display: none !important;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+code,
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 2px solid var(--bg);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------- layout --- */
+
+.app {
+  display: grid;
+  grid-template-rows: 64px 1fr;
+  height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(140deg, #6d87ff, #4f6ef7 60%, #3d54d6);
+  box-shadow: 0 3px 10px rgba(79, 110, 247, 0.28);
+}
+
+.brand-text h1 {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.brand-text .sub {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.brand-text .dot {
+  margin: 0 6px;
+  color: var(--faint);
+}
+
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.body {
+  display: grid;
+  grid-template-columns: 176px 1fr;
+  min-height: 0;
+}
+
+.side {
+  padding: 14px 10px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-btn:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.nav-btn.active {
+  background: var(--accent-weak);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.main {
+  overflow: auto;
+  padding: 20px 22px 28px;
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 980px;
+}
+
+/* ---------------------------------------------------------------- cards --- */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.card-head h2 {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+/* Several buttons can sit in a card header now. */
+.card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent) 0%, transparent 55%),
+    var(--panel);
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.hero h2 {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  margin-bottom: 4px;
+}
+
+.path {
+  color: var(--muted);
+  word-break: break-all;
+  user-select: text;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.tag {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.tag.accent {
+  background: var(--accent-weak);
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.tag.ok {
+  background: var(--ok-weak);
+  border-color: color-mix(in srgb, var(--ok) 24%, transparent);
+  color: var(--ok);
+}
+
+/* -------------------------------------------------------------- buttons --- */
+
+.btn {
+  border: 1px solid var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.04s ease;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: var(--panel-2);
+  border-color: var(--border-strong);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.btn.danger:hover {
+  filter: brightness(1.05);
+}
+
+.btn.ghost {
+  background: transparent;
+}
+
+.btn.danger.ghost {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.btn.danger.ghost:hover {
+  background: var(--danger-weak);
+}
+
+.btn.tiny {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.row-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* --------------------------------------------------------------- records --- */
+
+.filter-input {
+  width: 220px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  outline: none;
+}
+
+.filter-input:focus {
+  border-color: var(--accent);
+}
+
+.group-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin: 14px 0 6px;
+}
+
+.record-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.record-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+
+.record-row:hover {
+  background: var(--panel-2);
+}
+
+.r-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.r-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.r-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.r-path {
+  flex: none;
+  max-width: 34%;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: right;
+}
+
+.r-name-input {
+  font-weight: 600;
+}
+
+/* The delete button in the flat session list is always visible — it is the
+   only way to remove a session that belongs to no project in the library. */
+#allSessions .record-row .r-actions [data-act="del"] {
+  opacity: 1;
+}
+
+/* Same for the project records: removing an archived project is a routine
+   cleanup, and hiding the button behind a hover makes it undiscoverable. */
+#allProjects .record-row .r-actions [data-act="del-project"] {
+  opacity: 1;
+}
+
+.r-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.record-row:hover .r-actions {
+  opacity: 1;
+}
+
+/* ----------------------------------------------------------------- lists --- */
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: -4px -6px;
+}
+
+.project-node {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.project-node.current {
+  background: var(--accent-weak);
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.project-node.open {
+  background: var(--panel-2);
+  border-color: var(--border);
+}
+
+.project-node.current.open {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel-2));
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.project-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.chev {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--faint);
+  transition: transform 0.14s ease;
+}
+
+.project-node.open .chev {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+
+.p-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.p-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p-path {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.p-count {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+
+.project-node.current .p-count {
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+
+.item-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.project-row:hover .item-actions,
+.session-row:hover .item-actions {
+  opacity: 1;
+}
+
+/* The project row's primary actions stay visible: they are how you launch or
+   open a project. Only "移除" waits for hover, so the list stays calm. */
+.project-row .item-actions {
+  opacity: 1;
+}
+
+.project-row .item-actions [data-act="remove"] {
+  opacity: 0;
+}
+
+.project-row:hover .item-actions [data-act="remove"] {
+  opacity: 1;
+}
+
+/* --- sessions nested under a project --- */
+
+.session-box {
+  margin: 0 10px 8px 30px;
+  padding-left: 10px;
+  border-left: 1px dashed var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.session-row:hover {
+  background: var(--panel);
+}
+
+[data-theme="dark"] .session-row:hover {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+}
+
+.session-row.selected {
+  background: var(--accent-weak);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+[data-theme="dark"] .session-row.selected {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.s-pick {
+  display: flex;
+  align-items: center;
+  padding-right: 2px;
+  cursor: pointer;
+}
+
+.s-pick input[type="radio"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.session-row .s-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-row .s-name {
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.s-name-input {
+  width: 100%;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 2px 7px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--text);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.session-row .s-sub {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-row .s-del {
+  flex: none;
+  opacity: 0.55;
+  transition: opacity 0.12s ease;
+}
+
+.session-row:hover .s-del {
+  opacity: 1;
+}
+
+.session-empty,
+.session-loading {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 8px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+/* ------------------------------------------------------------------- kv --- */
+
+.kv {
+  display: grid;
+  gap: 8px;
+}
+
+.kv > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.kv span {
+  color: var(--muted);
+}
+
+.kv b {
+  font-weight: 600;
+  user-select: text;
+}
+
+/* ---------------------------------------------------------------- fields --- */
+
+.field {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.field > span {
+  color: var(--muted);
+}
+
+.field select,
+.field input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  outline: none;
+}
+
+.field select:focus,
+.field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.path-row {
+  display: grid;
+  grid-template-columns: 96px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+.path-row span {
+  color: var(--muted);
+}
+
+.path-row code {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+/* -------------------------------------------------------------- log box --- */
+
+.logbox {
+  margin: 12px 0 0;
+  padding: 12px;
+  max-height: 260px;
+  overflow: auto;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------------ misc --- */
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chip .pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.chip.running {
+  background: var(--ok-weak);
+  border-color: color-mix(in srgb, var(--ok) 30%, transparent);
+  color: var(--ok);
+}
+
+.chip.running .pulse {
+  background: var(--ok);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent);
+  animation: pulse 1.8s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 940px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cache-list {
+  display: grid;
+  gap: 6px;
+}
+
+.cache-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.cache-row input {
+  accent-color: var(--accent);
+}
+
+.cache-row .c-name {
+  flex: 1;
+}
+
+.cache-row .c-size {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.git-body {
+  display: grid;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.git-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.git-file {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 0;
+}
+
+/* --------------------------------------------------------------- toasts --- */
+
+.toasts {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+}
+
+.toast {
+  min-width: 220px;
+  max-width: 380px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  font-size: 12.5px;
+  animation: rise 0.16s ease;
+}
+
+.toast.ok {
+  border-color: color-mix(in srgb, var(--ok) 40%, transparent);
+  background: var(--ok-weak);
+  color: var(--ok);
+}
+
+.toast.err {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-weak);
+  color: var(--danger);
+}
+
+.toast.info {
+  color: var(--text);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

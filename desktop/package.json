@@ -1,0 +1,65 @@
+{
+  "name": "opencode-launcher-desktop",
+  "productName": "opencode 启动器",
+  "version": "1.1.0",
+  "description": "opencode 桌面启动器：项目管理、会话管理、启动与关闭、opencode 维护",
+  "main": "main.js",
+  "author": "opencode-launcher",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test:backend": "node test/backend-test.js",
+    "test:ui": "node test/ui-test.js",
+    "dist": "electron-builder --win nsis && node build/prune-dist.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
+    "playwright-core": "^1.63.0"
+  },
+  "build": {
+    "appId": "com.opencode.launcher",
+    "productName": "opencode 启动器",
+    "asar": true,
+    "compression": "maximum",
+    "afterPack": "build/afterPack.js",
+    "files": [
+      "main.js",
+      "preload.js",
+      "core/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../shared/web-seed.js",
+        "to": "shared/web-seed.js"
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "opencode-launcher-setup-${version}.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "opencode 启动器",
+      "uninstallDisplayName": "opencode 启动器"
+    }
+  }
+}

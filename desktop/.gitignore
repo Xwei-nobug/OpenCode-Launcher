@@ -1,0 +1,9 @@
+node_modules/
+dist/
+test/shots/
+*.log
+test/shot-*.png
+olk-out/
+test/.smoke.js
+olk-out/
+test/.smoke.js

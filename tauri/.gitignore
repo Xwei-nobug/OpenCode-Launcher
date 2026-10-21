@@ -1,0 +1,6 @@
+# 依赖与构建产物
+node_modules/
+src-tauri/target/
+
+# 归位后的交付物（每次 npm run dist 重新生成，不入库）
+dist/

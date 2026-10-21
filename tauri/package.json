@@ -1,0 +1,15 @@
+{
+  "name": "opencode-launcher-tauri",
+  "version": "1.1.0",
+  "private": true,
+  "description": "opencode 启动器（Tauri 版：WebView2 外壳，体积约 10MB）",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "dist": "tauri build && node scripts/collect-dist.mjs",
+    "collect": "node scripts/collect-dist.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  }
+}
