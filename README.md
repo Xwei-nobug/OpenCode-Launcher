@@ -1,234 +1,138 @@
 # opencode 启动器
 
-为 [opencode](https://opencode.ai) 提供一个桌面入口：项目管理、会话续接、终端启动，以及一个**内置的 Web 界面**——不必再打开浏览器，也不必手动处理登录。
-
-![Platform](https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D4)
-![Version](https://img.shields.io/badge/version-1.1.0-2ea043)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Built with](https://img.shields.io/badge/built%20with-Electron%20%7C%20Tauri-47848F)
+[opencode](https://opencode.ai) 的 Windows 桌面入口:管理项目、续接历史会话、一键在终端或内置 Web 界面里启动 opencode,并负责 opencode 本体的安装、更新与日常维护。
 
 ![界面预览](docs/screenshot.png)
 
----
+## 这是什么
 
-## 📖 目录
+opencode 是终端里的 AI 编程助手,裸用有几个日常麻烦:
 
-- [🖥 内置 OpenCode Web](#-内置-opencode-web)
-- [🔄 项目管理：一处修改，处处同步](#-项目管理一处修改处处同步)
-- [✨ 其他功能](#-其他功能)
-- [📦 两个版本](#-两个版本)
-- [🚀 安装](#-安装)
-- [📘 使用说明](#-使用说明)
-- [❓ 常见问题](#-常见问题)
-- [🔧 技术说明](#-技术说明)
-- [💻 开发](#-开发)
-- [🤝 贡献](#-贡献)
-- [📄 许可证](#-许可证)
+- 想续接之前的对话,得先想起来是在哪个目录、跑的哪次会话;
+- 每次都要先 cd 到项目目录再敲命令;
+- Web 界面好用,但要先起服务、开浏览器、过一遍登录,而且它的工作区面板和终端的项目列表互不相通;
+- 升级、清缓存这类事没有现成入口。
 
----
+启动器把这些收进一个窗口:左边是项目库,展开项目就能看到它名下的全部会话,选中任意一条再启动就是续接;顶部按钮直接打开内置 Web 界面;维护页负责 opencode 的安装、更新、卸载和缓存清理。
 
-## 🖥 内置 OpenCode Web
+目前只提供 Windows 10/11 安装包。
 
-点击顶部的 **启动 OpenCode Web**，opencode 的 Web 界面会在启动器窗口内打开。**两个版本均支持**（桌面版使用内置 Chromium，轻量版使用系统 WebView2）。
+## 功能
 
-| 能力 | 说明 |
-|---|---|
-| 免浏览器 | 界面内嵌于启动器，无额外依赖 |
-| 自动登录 | 服务受密码保护，启动器自动换取一次性配对 cookie 后载入 |
-| 项目自动对齐 | 打开时把启动器项目库写入 Web 的「工作区」面板 |
-| 单例复用 | 重复点击不新建窗口，仅切换到前台并补一次同步 |
-| 按需占用 | 窗口关闭即释放，不打开时零内存开销 |
-| 一并关闭 | 「关闭 opencode」会同时销毁 Web 窗口、终端窗格与后端进程 |
+### 项目与会话
 
-### 为什么需要内置窗口
+- 项目库管理常用目录,显示 Git 状态(分支、领先/落后、改动文件数),可一键打开文件夹。
+- 展开项目即列出该目录下的全部会话:标题、消息数、更新时间、所用模型。选中一条后「终端打开」即续接该会话,不选则新开。
+- 「全部记录」视图列出 opencode 里的所有项目与会话,包括没加入项目库的目录,支持搜索、重命名、删除,也可一键加入项目库。
+- 开机自动定位「最近项目」:按哪个项目的会话最近有更新判定,其次按项目添加时间,和最后一次点击的是哪个无关。
 
-opencode 的 Web 界面存在**两套互不相通的项目数据源**：
+### 启动方式
 
-| 界面 | 数据来源 |
-|---|---|
-| 设置 → 项目 | 服务端数据库（`opencode.db` 的 `project` 表） |
-| 主界面 → 工作区 | 浏览器 localStorage（`opencode.global.dat:server`） |
+- **终端打开**:在独立的终端窗口(Windows Terminal / cmd / PowerShell,可选)中进入项目目录并启动 opencode,不占用现有终端,可附加启动参数。
+- **启动 OpenCode Web**:Web 界面直接嵌在启动器窗口里,自动完成服务启动和登录配对,并把项目库对齐到 Web 的工作区面板;窗口关闭即释放内存,再次点击复用同一窗口。
 
-启动器可以写入服务端，但无法写入浏览器的 localStorage——这是「设置页列出了一堆项目，工作区却是空的」的根本原因。localStorage 没有服务端副本，URL 参数、深链接、`postMessage` 均不会触发持久化。
+### 项目库同步
 
-内置窗口的做法是让脚本运行在 `127.0.0.1:<port>` 这一源下，按 Web 端自身的数据结构写入项目列表——效果等同于手动「添加项目」，只是全自动完成。
+启动器与 opencode 双向对齐:在启动器里增删项目,Web 端和终端随之更新;在 Web 或终端里新建的项目,启动器启动或点「刷新」时自动收进项目库。在别处删掉的项目也会从库里移除。删除项目会一并删除它在 opencode 里的记录和会话,**磁盘文件不受影响**,操作前有确认。
 
-> 写入时会同步清理：上一轮由启动器写入、本轮已不在项目库中的条目会被移除；用户自行在 Web 端添加的项目不受影响。
+### 维护
 
-## 🔄 项目管理：一处修改，处处同步
+- 查看 opencode 已安装版本与最新版本;安装 / 修复、更新、卸载(有 npm 走 npm,没有则直接下载官方独立包,全程不需要预装 Node.js)。
+- 缓存占用分类统计与清理。
+- 环境自检:opencode 位置、npm、终端、数据库、服务接口逐项检查。
 
-**启动器项目库是唯一真相源。** 在启动器中新增、删除、重命名项目，Web 与终端随之变化；在 Web 或终端中所做的修改，会在启动器启动或点击「刷新」时回收。
+### 自动更新(仅轻量版)
 
-| 情况 | 处理方式 |
-|---|---|
-| 服务端有、项目库无 | 加入项目库（在 Web 或终端新建的项目） |
-| 项目库有、服务端无、上次同步时存在 | 判定为在别处被删除，从项目库移除 |
-| 项目库有、服务端无、上次同步时也不存在 | 视为新项目，登记到服务端 |
-| 两边都有 | 以服务端的项目名为准（重命名发生在该侧） |
+- 启动时后台查一次 GitHub 最新版本(24 小时内不重复联网),有新版会在「设置 → 关于」提示。
+- 也可随时点「检查更新」。下载后校验文件大小和格式,确认后弹出安装向导,启动器自动退出让位,向导完成后即升级完毕。
+- 桌面版不带此功能,仍需手动下载安装包覆盖。
 
-删除会同步到 opencode：移除项目时一并删除其 `project` 记录与名下会话，**磁盘文件不受影响**，操作前有二次确认。
+## 两个版本
 
-同步过程还会修正两类历史问题：`project_id` 被写成 `global` 的会话会重新挂回所属项目；同一目录因大小写不同产生的重复项目行会被合并。
-
-以下目录不会被识别为项目：用户主目录本身、系统临时目录及其子目录、盘符根目录、opencode 的 `global` 伪项目。opencode 启动后台服务时会将自身工作目录登记为项目，这类记录会被过滤，不会出现在列表中。
-
-## ✨ 其他功能
-
-### 📁 项目
-
-- 一键打开项目文件夹，或在该目录下启动终端
-- 最近项目列表，支持快速切换
-- 自动识别 Git 仓库，显示分支、领先/落后提交与改动统计
-
-### 💬 会话
-
-- 展开项目查看全部会话：标题、消息数、更新时间、所用模型
-- 选中会话后启动即**续接**，未选中则开启新会话
-- 行内重命名（回车保存）与删除，双击直接续接
-- **全部记录**视图列出 opencode 中的全部项目与会话，包括不在项目库中的目录；支持搜索、重命名、删除，或一键加入项目库
-
-### ⌨️ 终端
-
-- 每个会话在独立、可见的终端窗口中启动，不占用现有终端
-- 支持 Windows Terminal、命令提示符、PowerShell，可附加启动参数
-
-### 🛠 维护
-
-- 查看已安装版本与最新版本
-- 安装 / 修复、更新、卸载 opencode
-- 缓存占用分类统计与清理
-- 内置环境自检
-
-## 📦 两个版本
-
-| | 桌面版（Electron） | 轻量版（Tauri） |
+| | 轻量版(Tauri) | 桌面版(Electron) |
 |---|---|---|
-| 渲染内核 | 内置 Chromium | 系统 WebView2 |
-| 安装包 | ~83 MB | **~1.8 MB** |
-| 运行时依赖 | 无 | 系统需具备 WebView2（Windows 10/11 通常自带） |
-| 内置 Web 支持 | 支持 | 支持 |
-| 内置 Web 内存增量 | 约 +166 MB | 约 +234 MB |
-| 源码目录 | `desktop/` | `tauri/` |
+| 安装包 | ~1.8 MB | ~83 MB |
+| 渲染内核 | 系统 WebView2(Win10/11 一般自带) | 内置 Chromium |
+| 自动更新 | 有 | 无 |
+| 状态 | **主力维护,推荐** | 功能相同,不再积极更新 |
 
-两个版本功能一致。轻量版体积小一个数量级，适合日常使用；桌面版在频繁使用内置 Web 界面时更稳妥。
+两者功能一致。内置 Web 窗口打开期间的额外内存:桌面版约 +166 MB,轻量版约 +234 MB,关闭即释放——长时间挂 Web 界面可以选桌面版,其余场景轻量版都够用。
 
-> 内存增量为窗口打开期间的实测值，关闭窗口后释放，未打开时为 0。
+## 安装
 
-## 🚀 安装
+从 [Releases](https://github.com/Xwei-nobug/OpenCode-Launcher/releases) 下载:
 
-从 [Releases](https://github.com/Xwei-nobug/OpenCode-Launcher/releases) 下载：
+| 资产 | 说明 |
+|---|---|
+| `opencode-launcher-light-setup.exe` | 轻量版,推荐 |
+| `opencode-launcher-setup-x.y.z.exe` | 桌面版 |
 
-| 资产 | 说明 | 大小 |
-|---|---|---|
-| `opencode-launcher-light-setup.exe` | 轻量版安装器（推荐） | ~1.8 MB |
-| `opencode-launcher-setup-x.y.z.exe` | 桌面版安装器 | ~83 MB |
+双击运行,按提示完成即可,无需预装 Node.js 或其他依赖。首次打开若提示未安装 opencode,到「维护」页点「安装 / 修复」即可。
 
-双击运行，选择安装位置，按提示完成即可。安装包自带运行环境，**无需预装 Node.js 或其他依赖**。
-
-首次使用时若提示未安装 opencode，点击「安装 / 修复」即可：检测到 npm 时通过 npm 安装，否则直接下载官方发行版。
-
-## 📘 使用说明
-
-1. 添加项目目录（或直接在「全部记录」中把已有目录加入项目库）
-2. 点击 **启动 OpenCode Web** 使用 Web 界面，或点击项目行内的 **终端打开** 使用终端
-3. 顶部 **刷新** 会与 opencode 同步一次项目库，并重新读取项目与会话列表
-
-- 关闭启动器窗口即退出程序，正在运行的 opencode 会话不受影响
-- 需要结束 opencode 时，使用顶部的 **关闭 opencode**
-- 项目库、偏好与日志存放于 `%APPDATA%\opencode-launcher\`
-
-## ❓ 常见问题
-
-**Web 工作区为什么不显示我的项目？**
-
-因为该面板读取浏览器 localStorage，与「设置 → 项目」的服务端数据源无关。使用启动器的内置窗口打开即可自动对齐；用普通浏览器打开时无法写入。
-
-**删除项目会删除磁盘文件吗？**
-
-不会。删除的只是 opencode 中的 `project` 记录及其名下会话，磁盘目录原样保留。
-
-**关闭窗口会中断正在运行的任务吗？**
-
-不会。关闭启动器只退出界面，opencode 会话继续运行。只有「关闭 opencode」会结束它们。
-
-**需要预先安装 Node.js 吗？**
-
-不需要。安装包自带运行环境；轻量版依赖系统 WebView2，Windows 10/11 一般已内置。
-
-**支持 macOS 或 Linux 吗？**
-
-目前只提供 Windows 安装包。代码本身未使用 Windows 专有 API 的部分可以移植，但尚未适配。
-
-**为什么列表里偶尔会多出一个不是自己添加的项目？**
-
-opencode 启动后台服务时会把自身工作目录登记为项目。启动器会过滤用户主目录、临时目录与盘符根目录，因此这类记录不会显示。
-
-## 🔧 技术说明
-
-### 数据存储
+## 数据存放
 
 | 数据 | 位置 |
 |---|---|
-| 项目库、偏好 | `%APPDATA%\opencode-launcher\config.json` |
-| opencode 会话与项目 | `~/.local/share/opencode/opencode.db`（SQLite，WAL） |
-| Web 工作区面板 | 浏览器 localStorage（`opencode.global.dat:server`） |
+| 项目库、偏好、日志 | `%APPDATA%\opencode-launcher\` |
+| opencode 的会话与项目 | `~/.local/share/opencode/opencode.db`(SQLite) |
 
-### 工作区同步
+关闭启动器窗口只退出界面,正在运行的 opencode 会话不受影响;需要结束它们时用顶部的「关闭 opencode」。
 
-合并规则只有一份实现：`shared/web-seed.js`。桌面版在运行时读取该文件，轻量版通过 `include_str!` 编译内嵌，两端行为保持一致。
+## 常见问题
 
-写入采用「标记 + 清扫」策略：记录上一次由启动器写入的目录集合，本轮不在集合中的条目移除，其余保留，从而区分「用户删除」与「用户自建」。
+**Web 工作区为什么不显示我的项目?**
+该面板读的是浏览器 localStorage,和「设置 → 项目」的服务端数据不是一回事。用启动器的内置窗口打开会自动对齐;普通浏览器打开则写不进去。
 
-## 💻 开发
+**删除项目会删掉磁盘文件吗?**
+不会。删的只是 opencode 里的项目记录及其会话。
 
-### 桌面版（Electron）
+**列表里偶尔多出一个没添加过的项目?**
+opencode 启动后台服务时会把工作目录登记为项目。启动器会过滤用户主目录、临时目录和盘符根目录,这类记录不会显示。
+
+**支持 macOS / Linux 吗?**
+目前只有 Windows 安装包。
+
+## 开发
+
+### 轻量版(Tauri,主力)
+
+需要 Rust stable 和 MSVC 构建工具(Visual Studio Build Tools 的 C++ 工作负载)。
+
+```bash
+cd tauri
+npm install
+npm run dev                     # 开发运行
+npm run dist                    # 打包 -> tauri/dist/
+node test/full-test.mjs         # 功能测试(Playwright + mock IPC)
+node test/session-pick-test.mjs # 会话选择交互测试
+cd src-tauri && cargo test      # 后端单元测试
+```
+
+前端在 `tauri/renderer/`(与桌面版同源,由 `bridge.js` 把 IPC 通道映射为 Tauri 命令),Rust 后端在 `tauri/src-tauri/src/`(`core.rs` 业务逻辑,`main.rs` 命令层)。
+
+### 桌面版(Electron)
 
 ```bash
 cd desktop
 npm install
 npm start              # 开发运行
 npm run test:backend   # 后端测试
-npm run test:ui        # Playwright 端到端测试（真实窗口）
-npm run dist           # 打包 -> desktop/dist/（仅保留安装包）
+npm run test:ui        # Playwright 端到端测试
+npm run dist           # 打包 -> desktop/dist/
 ```
-
-### 轻量版（Tauri）
-
-需要 Rust stable（`rustup`）与 MSVC 构建工具（Visual Studio Build Tools 的 C++ 工作负载）。
-
-```bash
-cd tauri
-npm install
-npm run dev            # 开发运行
-npm run dist           # 打包 -> tauri/dist/（仅保留安装包）
-npm run collect        # 仅归位已构建产物，不重新编译
-node test/full-test.mjs            # 功能测试（49 项，Playwright + mock IPC）
-node test/session-pick-test.mjs    # 会话选择交互测试
-cd src-tauri && cargo test         # 后端单元测试
-```
-
-Rust 后端位于 `tauri/src-tauri/src/`（`core.rs` 业务逻辑，`main.rs` 命令层）。前端复用 `desktop/renderer/`，由 `tauri/renderer/bridge.js` 将 IPC 通道映射为 Tauri 命令。
-
-> 打包路径需为纯 ASCII 且不含空格。路径中若包含中文或空格，NSIS 可能报错或产出异常大小的安装包。
 
 ### 发布
 
 ```bash
-node scripts/publish-release.mjs v1.1.0 --notes docs/release-notes-v1.1.0.md \
-  desktop/dist/opencode-launcher-setup-1.1.0.exe \
-  tauri/dist/opencode-launcher-setup.exe:opencode-launcher-light-setup.exe
+node scripts/publish-release.mjs v1.1.1 --notes docs/release-notes-v1.1.1.md \
+  tauri/dist/opencode-launcher-setup.exe:opencode-launcher-light-setup.exe \
+  desktop/dist/opencode-launcher-setup-1.1.1.exe
 ```
 
-Token 由本机 git 凭据管理器提供；同名资产会被替换，脚本可重复执行。`node scripts/list-releases.mjs` 可列出各版本及其资产。
+Token 由本机 git 凭据管理器提供,同名资产会被替换,脚本可重复执行。`node scripts/list-releases.mjs` 列出各版本及资产。
 
-## 🤝 贡献
+注意:打包路径需为纯 ASCII 且不含空格,否则 NSIS 可能报错或产出异常安装包。
 
-欢迎提交 Issue 与 Pull Request。提交前请确保：
-
-- `npm run test:backend` 与 `node test/full-test.mjs` 通过
-- 涉及界面改动时附上截图
-- 提交信息使用 `feat:` / `fix:` / `docs:` 前缀
-
-## 📄 许可证
+## 许可
 
 [MIT](LICENSE)
