@@ -1,7 +1,7 @@
 {
   "name": "opencode-launcher-desktop",
   "productName": "opencode 启动器",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "opencode 桌面启动器：项目管理、会话管理、启动与关闭、opencode 维护",
   "main": "main.js",
   "author": "opencode-launcher",

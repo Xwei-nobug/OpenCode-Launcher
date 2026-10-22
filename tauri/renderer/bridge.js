@@ -45,6 +45,9 @@
     "cache:analyze": "cache_analyze",
     "cache:clear": "cache_clear",
     "log:read": "log_read",
+    "updater:check": "updater_check",
+    "updater:download": "updater_download",
+    "updater:install": "updater_install",
     doctor: "doctor",
   };
 

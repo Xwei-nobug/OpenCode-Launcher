@@ -12,7 +12,7 @@
 //   6. 全部记录 view: all sessions + all projects, search filter, add to library
 //   7. web version button
 //   8. maintenance view: versions, cache list, doctor
-//   9. settings view: prefs save, path rows
+//   9. settings view: prefs save, path rows, self-updater
 //  10. launch / kill wiring
 //
 // Exits non-zero on the first failing expectation.
@@ -47,14 +47,17 @@ const mockTauri = () => {
   ];
   const config = {
     projects: [{ path: dir, name: "project", addedAt: 1 }],
-    lastProject: dir,
+    // Deliberately NOT dir: boot must pick recentProject (derived from session
+    // activity), not whichever project was clicked last.
+    lastProject: dir2,
     prefs: { terminal: "auto", extraArgs: "" },
   };
   const git = { ok: true, isRepo: true, branch: "main", ahead: 1, behind: 0, staged: 0, unstaged: 2, untracked: 0, clean: false, files: [{ status: " M", name: "a.txt" }], total: 1 };
   const state = {
-    app: { version: "1.1.0", electron: "Tauri/WebView2", node: "-", theme: "light", isDev: false },
+    app: { version: "1.1.1", electron: "Tauri/WebView2", node: "-", theme: "light", isDev: false },
     paths: { dataDir: "C:/data", config: "C:/config.json", log: "C:/log", db: "C:/opencode.db", ocLog: "C:/oclog" },
     config,
+    recentProject: dir,
     opencode: { found: true, path: "C:/opencode.exe", current: "2.0.30", major: 2, npmPkg: "@opencode/cli", npm: "npm", running: false },
     terminals: { wt: true },
   };
@@ -96,6 +99,14 @@ const mockTauri = () => {
               ],
             });
           case "cache_clear": return Promise.resolve({ ok: true });
+          case "updater_check":
+            return Promise.resolve({ ok: true, current: "1.1.1", latest: "9.9.9", newer: true, url: "https://x/light.exe", size: 1800000, page: "https://github.com/x/releases/latest", at: 1 });
+          case "updater_download":
+            return Promise.resolve({ ok: true, path: "C:/Temp/opencode-launcher-update/opencode-launcher-light-setup.exe" });
+          case "updater_install": {
+            window.__updateInstalled = true;
+            return Promise.resolve({ ok: true });
+          }
           case "doctor": return Promise.resolve({ ok: true, text: "全部正常" });
           case "web_open": {
             const r = { ok: true, url: "http://127.0.0.1:45278/auth/connect/abc123", base: "http://127.0.0.1:45278" };
@@ -176,9 +187,10 @@ const boot = await page.evaluate(() => ({
   running: document.getElementById("runningText")?.textContent?.trim(),
   gitShown: !document.getElementById("gitCard")?.hidden,
 }));
-check("启动后读取状态并渲染项目库", boot.version === "1.1.0" && boot.projects === 1, JSON.stringify(boot));
+check("启动后读取状态并渲染项目库", boot.version === "1.1.1" && boot.projects === 1, JSON.stringify(boot));
 check("顶部显示 opencode 版本", boot.ocVersion === "2.0.30");
 check("Hero 显示当前项目名", boot.heroName === "project");
+check("开机选中 recentProject（会话最新/最近添加）而非最后点击的", boot.heroName === "project");
 check("运行计数显示 2", boot.running === "运行中 2", boot.running);
 check("Git 卡片可见", boot.gitShown === true);
 
@@ -425,6 +437,34 @@ const paths = await page.evaluate(() => ({
 }));
 check("设置页显示会话库路径", paths.db === "C:/opencode.db", paths.db);
 check("设置页显示数据目录", paths.data === "C:/data", paths.data);
+
+// 9b. self-updater — the startup probe fires ~2s after boot with force=false.
+await page.waitForFunction(() => window.__calls.some((c) => c.cmd === "updater_check"), null, { timeout: 8000 });
+const upd = await page.evaluate(() => ({
+  self: document.getElementById("verSelf")?.textContent?.trim(),
+  latest: document.getElementById("verLatest")?.textContent?.trim(),
+  getHidden: document.getElementById("btnUpdateGet")?.hidden,
+  startupCall: window.__calls.find((c) => c.cmd === "updater_check"),
+}));
+check("启动时静默检查了更新", Boolean(upd.startupCall), JSON.stringify(upd.startupCall?.args?.p));
+check("启动检查不带 force（走后端 24h 缓存）", upd.startupCall && upd.startupCall.args.p && upd.startupCall.args.p.force === false);
+check("关于卡显示当前与最新版本", upd.self === "1.1.1" && upd.latest === "9.9.9", JSON.stringify(upd));
+check("有新版时显示「下载并安装」", upd.getHidden === false);
+
+await page.click("#btnUpdateCheck");
+await page.waitForTimeout(300);
+const manualCall = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "updater_check").pop());
+check("手动检查带 force", manualCall && manualCall.args.p && manualCall.args.p.force === true, JSON.stringify(manualCall?.args?.p));
+
+// The confirm dialog is auto-accepted by the harness; a successful install
+// never returns in the real app, but the call itself must go out in order.
+await page.click("#btnUpdateGet");
+await page.waitForTimeout(400);
+const flow = await page.evaluate(() => ({
+  dl: window.__calls.filter((c) => c.cmd === "updater_download").length,
+  ins: window.__calls.filter((c) => c.cmd === "updater_install").length,
+}));
+check("「下载并安装」依次调用 download 与 install", flow.dl > 0 && flow.ins > 0, JSON.stringify(flow));
 
 /* 10. launch / kill ------------------------------------------------------- */
 await page.click('.nav-btn[data-view="projects"]');

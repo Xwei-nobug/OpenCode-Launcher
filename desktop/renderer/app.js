@@ -789,7 +789,7 @@ async function refreshRunning() {
 async function checkVersions() {
   const r = await api("maintenance:status");
   $("ocInstalled").textContent = r.current || "未安装";
-  $("ocLatest").textContent = r.latest || (r.npm ? "查询失败" : "未检测到 npm");
+  $("ocLatest").textContent = r.latest || "查询失败";
   $("ocMode").textContent = r.pkg || "—";
   state.opencode.current = r.current || "";
   $("ocVersion").textContent = state.opencode.current || "未安装";

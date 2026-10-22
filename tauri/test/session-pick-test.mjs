@@ -32,7 +32,7 @@ const mockTauri = () => {
   };
   const git = { ok: true, isRepo: true, branch: "main", ahead: 0, behind: 0, staged: 0, unstaged: 0, untracked: 0, clean: true, files: [], total: 0 };
   const state = {
-    app: { version: "1.1.0", electron: "Tauri/WebView2", node: "-", theme: "light", isDev: false },
+    app: { version: "1.1.1", electron: "Tauri/WebView2", node: "-", theme: "light", isDev: false },
     paths: { dataDir: "C:/data", config: "C:/config.json", log: "C:/log", db: "C:/opencode.db", ocLog: "C:/oclog" },
     config,
     opencode: { found: true, path: "C:/opencode.exe", current: "2.0.30", major: 2, npmPkg: "@opencode/cli", npm: "npm", running: false },

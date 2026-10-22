@@ -94,9 +94,12 @@ async function boot() {
   state.paths = s.paths;
   state.config = s.config;
   state.opencode = s.opencode;
-  state.currentDir = s.config.lastProject || "";
+  // The startup project follows real usage — the backend derives it from the
+  // freshest session (else the newest add). lastProject is only a fallback.
+  state.currentDir = s.recentProject || s.config.lastProject || "";
 
   $("appVersion").textContent = s.app.version;
+  $("verSelf").textContent = s.app.version;
   $("ocVersion").textContent = s.opencode.current || "未安装";
   $("verElectron").textContent = s.app.electron;
   $("verNode").textContent = s.app.node;
@@ -130,6 +133,11 @@ async function boot() {
   // Reconcile with opencode in the background: a project created (or deleted)
   // in the web UI or the terminal should show up here without a manual refresh.
   syncProjectsQuietly();
+
+  // Startup update probe. The backend serves a cached answer inside its 24h
+  // TTL, so this normally never touches the network; delayed so first paint
+  // and project loading are never behind it.
+  setTimeout(() => checkForUpdate(false).catch(() => {}), 2000);
 }
 
 /**
@@ -257,6 +265,8 @@ function bind() {
     })
   );
   $("btnUninstallApp").addEventListener("click", uninstallApp);
+  $("btnUpdateCheck").addEventListener("click", () => withBusy($("btnUpdateCheck"), () => checkForUpdate(true)));
+  $("btnUpdateGet").addEventListener("click", () => withBusy($("btnUpdateGet"), installUpdate));
 
   // The "running" chip is refreshed on the events that can change it (launch,
   // kill, window focus) instead of on a timer: every poll walks the process
@@ -796,7 +806,7 @@ async function refreshRunning() {
 async function checkVersions() {
   const r = await api("maintenance:status");
   $("ocInstalled").textContent = r.current || "未安装";
-  $("ocLatest").textContent = r.latest || (r.npm ? "查询失败" : "未检测到 npm");
+  $("ocLatest").textContent = r.latest || "查询失败";
   $("ocMode").textContent = r.pkg || "—";
   state.opencode.current = r.current || "";
   $("ocVersion").textContent = state.opencode.current || "未安装";
@@ -878,6 +888,48 @@ async function uninstallApp() {
   if (!confirm("卸载 opencode 启动器？卸载后本程序将被移除。")) return;
   const r = await api("maintenance:uninstallApp");
   if (!r.ok) toast(r.error || "无法启动卸载程序", "err");
+}
+
+/* ---------------------------------------------------------------- updater --- */
+
+/**
+ * Compare the running build against the latest GitHub release. `force` is the
+ * manual button; the startup probe passes false so a check inside the
+ * backend's 24h TTL window is served from cache without a network round-trip.
+ */
+async function checkForUpdate(force) {
+  const r = await api("updater:check", { force }).catch(() => null);
+  if (!r) {
+    $("verLatest").textContent = "查询失败";
+    if (force) toast("检查更新失败", "err");
+    return;
+  }
+  $("verLatest").textContent = r.latest || "未知";
+  const newer = !!r.newer;
+  $("btnUpdateGet").hidden = !newer;
+  if (!newer) {
+    if (force) toast("已是最新版本", "ok");
+    return;
+  }
+  // A fresh probe (manual or startup) announces itself; a cached one only
+  // repaints the row, so reopening the app stays quiet.
+  if (force || !r.cached) toast(`发现新版本 ${r.latest}`, "ok");
+}
+
+/**
+ * Download the light setup from the release, then hand over to the NSIS
+ * wizard — which needs this app closed to replace its files, so the install
+ * call does not come back on success.
+ */
+async function installUpdate() {
+  if (!confirm(`下载最新安装包并打开安装向导？\n启动器随后会关闭，升级由安装向导完成。`)) return;
+  const d = await api("updater:download");
+  if (!d.ok) {
+    toast(d.error || "下载失败", "err");
+    return;
+  }
+  const r = await api("updater:install");
+  if (!r.ok) toast(r.error || "无法启动安装向导", "err");
 }
 
 /* ---------------------------------------------------------------- records --- */

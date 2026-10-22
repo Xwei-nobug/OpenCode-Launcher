@@ -28,6 +28,7 @@ fn arg_string(p: &Value) -> String {
 #[tauri::command]
 fn state_get() -> Value {
     let cfg = core::read_config();
+    let recent = core::recent_project(&cfg);
     let oc = core::locate_opencode();
     let version = core::installed_version();
     let major = core::opencode_major();
@@ -48,6 +49,7 @@ fn state_get() -> Value {
             "ocLog": core::opencode_log_dir().display().to_string(),
         },
         "config": cfg,
+        "recentProject": recent,
         "opencode": {
             "found": oc.is_some(),
             "path": oc.map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
@@ -572,6 +574,39 @@ fn doctor() -> Value {
     core::doctor()
 }
 
+/* ---------------------------------------------------------------- updater --- */
+
+#[tauri::command]
+fn updater_check(p: Value) -> Value {
+    let force = p.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
+    core::update_check(force)
+}
+
+#[tauri::command]
+fn updater_download() -> Value {
+    match core::update_download() {
+        Ok(path) => json!({ "ok": true, "path": path.to_string_lossy() }),
+        Err(e) => json!({ "ok": false, "error": e }),
+    }
+}
+
+#[tauri::command]
+fn updater_install(app: AppHandle) -> Value {
+    // The installer path is re-derived from the fixed temp location — it is
+    // never accepted from the renderer.
+    let path = core::update_setup_path();
+    if !path.is_file() {
+        return json!({ "ok": false, "error": "安装包不存在，请先下载" });
+    }
+    if let Err(e) = core::update_install_ready() {
+        return json!({ "ok": false, "error": e });
+    }
+    core::log(&format!("update: launching installer {}", path.display()));
+    let _ = std::process::Command::new(&path).spawn();
+    app.exit(0);
+    json!({ "ok": true })
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -591,6 +626,7 @@ fn main() {
             web_open_app, web_bookmarklet,
             maintenance_status, maintenance_install, maintenance_uninstall, maintenance_uninstall_app,
             cache_analyze, cache_clear, log_read, doctor,
+            updater_check, updater_download, updater_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

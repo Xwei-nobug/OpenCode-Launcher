@@ -2998,6 +2998,40 @@ async function npmLatestVersion(npm, pkg) {
   }
 }
 
+/**
+ * Newest version straight from the package registry.
+ *
+ * npm is not a prerequisite for opencode: the official standalone installer
+ * drops a binary into `~/.opencode/bin` without Node.js or npm. Those installs
+ * still need a version check, so query the registry over HTTPS instead of
+ * shelling out to `npm view`.
+ */
+async function registryLatestVersion(pkg) {
+  for (const base of ["https://registry.npmjs.org", "https://registry.npmmirror.com"]) {
+    try {
+      const raw = await httpsGetBuffer(`${base}/${pkg}/latest`, 30000);
+      const meta = JSON.parse(raw.toString("utf8"));
+      const version = String((meta && meta.version) || "").trim();
+      if (/^\d+\.\d+\.\d+/.test(version)) return version;
+    } catch {
+      /* try the next registry */
+    }
+  }
+  return "";
+}
+
+/**
+ * Latest version for the maintenance panel.
+ *
+ * Prefer npm because it honours the user's configured registry; when npm is
+ * absent (official standalone install) or its query fails, use the registry
+ * API directly. This keeps the panel useful on machines without Node.js.
+ */
+async function latestVersion(npm, pkg) {
+  const fromNpm = npm ? await npmLatestVersion(npm, pkg).catch(() => "") : "";
+  return fromNpm || registryLatestVersion(pkg);
+}
+
 /* ------------------------------------- standalone (non-npm) install path --- */
 
 /** Walk a ustar archive in memory — npm tarballs need no tar.exe. */
@@ -3386,6 +3420,8 @@ module.exports = {
   listLaunches,
   isLaunchedRunning,
   npmLatestVersion,
+  registryLatestVersion,
+  latestVersion,
   isProjectDir,
   gitStatus,
   listSessions,

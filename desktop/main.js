@@ -535,7 +535,7 @@ handle("maintenance:status", async () => {
   const [current, major, latest] = await Promise.all([
     core.installedVersion({ refresh: true }).catch(() => ""),
     core.opencodeMajor({ refresh: true }).catch(() => 0),
-    npm ? core.npmLatestVersion(npm, pkg).catch(() => "") : Promise.resolve(""),
+    core.latestVersion(npm, pkg).catch(() => ""),
   ]);
   return { current, major, latest, npm, pkg };
 });

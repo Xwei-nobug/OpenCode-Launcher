@@ -6,13 +6,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 pub const APP_DIR: &str = "opencode-launcher";
-pub const BUILD: &str = "1.1.0";
+pub const BUILD: &str = env!("CARGO_PKG_VERSION");
 
 const DETACHED_PROCESS: u32 = 0x0000_0008;
 const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
@@ -97,6 +97,11 @@ pub struct Config {
     /// library entry apart from one deleted in the web UI or the terminal.
     #[serde(default, rename = "syncedPaths")]
     pub synced_paths: Vec<String>,
+    /// Last GitHub self-update probe (`update_check`), kept so a startup check
+    /// inside the TTL window never touches the network. `prefs: Value` style —
+    /// the shape is owned by the updater module.
+    #[serde(default, rename = "lastUpdateCheck")]
+    pub last_update_check: Value,
 }
 
 pub fn read_config() -> Config {
@@ -111,6 +116,7 @@ pub fn read_config() -> Config {
         prefs: json!({ "terminal": "auto", "extraArgs": "" }),
         last_project: String::new(),
         synced_paths: Vec::new(),
+        last_update_check: Value::Null,
     }
 }
 
@@ -257,7 +263,10 @@ pub fn opencode_major() -> u8 {
 }
 
 pub fn npm_pkg() -> &'static str {
-    if opencode_major() >= 2 { REGISTRY_V2 } else { REGISTRY }
+    let version = installed_version();
+    // Match the Electron build: a fresh machine gets the current v2 line; only
+    // an actually installed v1 copy should keep using the frozen v1 package.
+    if version.is_empty() || version.starts_with("2.") { REGISTRY_V2 } else { REGISTRY }
 }
 
 pub fn resolve_npm() -> String {
@@ -833,6 +842,45 @@ pub fn list_all_sessions() -> Value {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     json!({ "ok": true, "sessions": list })
+}
+
+/// Which library project the hero should open on: the one whose latest session
+/// update is newest. Projects without sessions score lowest on that axis and
+/// fall back to their added-at time, so a freshly added empty project still
+/// wins over stale ones. `lastProject` (whatever was clicked last) is only the
+/// renderer's fallback — clicking around must not decide what "recent" means.
+fn pick_recent<'a>(projects: &'a [Project], latest: &std::collections::HashMap<String, f64>) -> Option<&'a Project> {
+    projects.iter().max_by(|a, b| {
+        let sa = latest.get(&path_key(&a.path)).copied().unwrap_or(f64::MIN);
+        let sb = latest.get(&path_key(&b.path)).copied().unwrap_or(f64::MIN);
+        sa.partial_cmp(&sb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.added_at.cmp(&b.added_at))
+    })
+}
+
+/// Startup project for `state_get`: freshest session wins, else newest add.
+pub fn recent_project(cfg: &Config) -> String {
+    if cfg.projects.is_empty() {
+        return String::new();
+    }
+    let mut latest: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    if let Some(sessions) = list_all_sessions()["sessions"].as_array() {
+        for s in sessions {
+            let Some(dir) = s["directory"].as_str() else { continue };
+            if dir.is_empty() {
+                continue;
+            }
+            let updated = num(&s["updated"]);
+            let entry = latest.entry(path_key(dir)).or_insert(f64::MIN);
+            if updated > *entry {
+                *entry = updated;
+            }
+        }
+    }
+    pick_recent(&cfg.projects, &latest)
+        .map(|p| p.path.clone())
+        .unwrap_or_default()
 }
 
 /* -------------------------------------------------------------------- web --- */
@@ -2452,11 +2500,31 @@ pub fn uninstall_opencode(emit: &dyn Fn(&str)) -> Value {
     json!({ "ok": gone, "stdout": chunks.join("\n"), "stderr": "" })
 }
 
+/// Query the package registry directly, without requiring npm.
+///
+/// The official standalone installer writes `~/.opencode/bin/opencode.exe`
+/// without Node.js or npm, so `npm view` is not available on those machines.
+fn registry_latest_version(pkg: &str) -> String {
+    for base in ["https://registry.npmjs.org", "https://registry.npmmirror.com"] {
+        let url = format!("{}/{}/latest", base, pkg);
+        let raw = run("curl.exe", &["-sS", "-L", "--max-time", "30", &url]);
+        let Ok(meta) = serde_json::from_str::<Value>(raw.trim()) else { continue };
+        let version = meta["version"].as_str().unwrap_or("").trim();
+        let looks_valid = version.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+            && version.matches('.').count() >= 2;
+        if looks_valid {
+            return version.to_string();
+        }
+    }
+    String::new()
+}
+
 pub fn maintenance_status() -> Value {
     let current = installed_version();
     let pkg = npm_pkg();
     let npm = resolve_npm();
-    let latest = if find_on_path("npm").is_some() {
+    let npm_ok = find_on_path("npm").is_some();
+    let mut latest = if npm_ok {
         run(&npm, &["view", &pkg, "version"])
             .lines()
             .map(|l| l.trim().to_string())
@@ -2465,7 +2533,216 @@ pub fn maintenance_status() -> Value {
     } else {
         String::new()
     };
+    if latest.is_empty() {
+        latest = registry_latest_version(pkg);
+    }
     json!({ "current": current, "latest": latest, "npm": npm, "pkg": pkg })
+}
+
+/* ----------------------------------------------------------------- updater --- */
+//
+// Self-update against the project's own GitHub releases. The light build is
+// published as one fixed-name asset (`opencode-launcher-light-setup.exe`, ~2MB
+// NSIS wizard); check the API, download the wizard, hand over and exit — the
+// same hand-over `maintenance_uninstall_app` performs for uninstalls.
+
+const UPDATE_REPO: &str = "Xwei-nobug/OpenCode-Launcher";
+const UPDATE_ASSET: &str = "opencode-launcher-light-setup.exe";
+const UPDATE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// `owner/repo` to query; `OC_LAUNCHER_UPDATE_REPO` overrides for tests/forks.
+fn update_repo() -> String {
+    let v = std::env::var("OC_LAUNCHER_UPDATE_REPO").unwrap_or_default();
+    let v = v.trim().trim_matches('/');
+    if v.is_empty() { UPDATE_REPO.to_string() } else { v.to_string() }
+}
+
+/// Where the downloaded wizard lands — also what `updater_install` re-derives,
+/// so the installer path never crosses the IPC boundary.
+pub fn update_setup_path() -> PathBuf {
+    std::env::temp_dir().join("opencode-launcher-update").join(UPDATE_ASSET)
+}
+
+/// Numeric x.y.z compare. Parts beyond the dotted digits (pre-release tags)
+/// are ignored, so "1.2.0-beta" equals "1.2.0"; every release here is plain.
+fn version_newer(remote: &str, local: &str) -> bool {
+    let parts = |s: &str| -> Vec<u64> {
+        s.trim()
+            .trim_start_matches(['v', 'V'])
+            .split(|c: char| !c.is_ascii_digit())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parts(remote), parts(local));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// Tag (v-stripped) + download URL + size + asset id of the light asset in a
+/// `/releases/latest` payload. None when the payload has no light asset.
+fn update_asset(payload: &Value) -> Option<(String, String, u64, u64)> {
+    let tag = payload["tag_name"].as_str()?.trim().trim_start_matches(['v', 'V']).to_string();
+    let asset = payload["assets"].as_array()?
+        .iter()
+        .find(|a| a["name"].as_str() == Some(UPDATE_ASSET))?;
+    Some((
+        tag,
+        asset["browser_download_url"].as_str()?.to_string(),
+        asset["size"].as_u64().unwrap_or(0),
+        asset["id"].as_u64().unwrap_or(0),
+    ))
+}
+
+/// Compare `BUILD` against the latest GitHub release. A successful probe is
+/// cached in the config for 24h so startup checks stay offline; `force`
+/// (the manual button) always re-queries.
+pub fn update_check(force: bool) -> Value {
+    let current = BUILD.to_string();
+    let now = now_ms() as u64;
+    let cfg = read_config();
+    if !force {
+        if let Some(c) = cfg.last_update_check.as_object() {
+            let fresh = c.get("at")
+                .and_then(|v| v.as_u64())
+                .map(|at| now.saturating_sub(at) < UPDATE_TTL_MS)
+                .unwrap_or(false);
+            if fresh {
+                let mut v = cfg.last_update_check.clone();
+                v["cached"] = json!(true);
+                v["current"] = json!(current);
+                return v;
+            }
+        }
+    }
+
+    let repo = update_repo();
+    let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let raw = run(
+        "curl.exe",
+        &[
+            "-sS", "-L", "--max-time", "30",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", &format!("User-Agent: opencode-launcher/{}", BUILD),
+            &url,
+        ],
+    );
+    let parsed = if raw.trim().is_empty() {
+        Err("网络请求失败".to_string())
+    } else {
+        serde_json::from_str::<Value>(raw.trim()).map_err(|_| "GitHub 响应无法解析".to_string())
+    }
+    .and_then(|v| update_asset(&v).ok_or_else(|| "Release 里没有轻量版安装包".to_string()));
+
+    let result = match parsed {
+        Ok((latest, url, size, asset_id)) => json!({
+            "ok": true, "current": current, "latest": latest,
+            "newer": version_newer(&latest, &current),
+            "url": url, "size": size, "assetId": asset_id,
+            "page": format!("https://github.com/{}/releases/latest", repo),
+            "at": now,
+        }),
+        Err(e) => json!({ "ok": false, "error": format!("查询失败：{}", e), "current": current, "at": now }),
+    };
+    // Only a successful probe is cached — a failed one should retry next start.
+    if result["ok"].as_bool() == Some(true) {
+        let mut cfg = cfg;
+        cfg.last_update_check = result.clone();
+        write_config(&cfg);
+    }
+    result
+}
+
+/// Download the wizard to `update_setup_path()`. Size must match the probe
+/// (catches truncated downloads) and the file must be a PE image, not the
+/// HTML page a captive portal or proxy would hand back.
+///
+/// The API asset endpoint (`api.github.com/.../releases/assets/{id}` with an
+/// octet-stream Accept) is tried first because it redirects straight to the
+/// CDN hosts, which often stay reachable where github.com itself is blocked;
+/// the plain browser URL is the fallback.
+pub fn update_download() -> Result<PathBuf, String> {
+    let probe = read_config().last_update_check;
+    let url = probe["url"].as_str().ok_or("请先检查更新")?.to_string();
+    let asset_id = probe["assetId"].as_u64().unwrap_or(0);
+    let expected = probe["size"].as_u64().unwrap_or(0);
+    let dest = update_setup_path();
+    fs::create_dir_all(dest.parent().unwrap_or(&dest)).map_err(|e| format!("无法创建临时目录：{}", e))?;
+
+    let mut candidates: Vec<String> = Vec::new();
+    if asset_id > 0 {
+        candidates.push(format!("https://api.github.com/repos/{}/releases/assets/{}", update_repo(), asset_id));
+    }
+    candidates.push(url);
+
+    let mut last_err = String::new();
+    for u in &candidates {
+        let _ = fs::remove_file(&dest);
+        let out = run_status(
+            "curl.exe",
+            &[
+                "-sS", "-L", "--fail", "--max-time", "900",
+                "-H", "Accept: application/octet-stream",
+                "-H", &format!("User-Agent: opencode-launcher/{}", BUILD),
+                "-o", &dest.to_string_lossy(), u,
+            ],
+        );
+        if out.status.success() {
+            let meta = match fs::metadata(&dest) {
+                Ok(m) => m,
+                Err(e) => {
+                    last_err = format!("下载的文件不可读：{}", e);
+                    continue;
+                }
+            };
+            let bad = if expected > 0 && meta.len() != expected {
+                Some(format!("文件大小不匹配（期望 {} 字节，实得 {}）", expected, meta.len()))
+            } else if meta.len() < 500_000 {
+                Some("下载的文件过小，可能不是安装包".to_string())
+            } else if !is_pe_file(&dest) {
+                Some("下载的文件不是有效的安装程序".to_string())
+            } else {
+                None
+            };
+            if let Some(e) = bad {
+                last_err = e;
+                continue;
+            }
+            return Ok(dest);
+        }
+        last_err = String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("").to_string();
+    }
+    let _ = fs::remove_file(&dest);
+    Err(format!("下载失败：{}", last_err))
+}
+
+fn is_pe_file(p: &Path) -> bool {
+    let mut head = [0u8; 2];
+    fs::File::open(p)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .map(|_| &head == b"MZ")
+        .unwrap_or(false)
+}
+
+/// The wizard cannot overwrite a launcher that is still running, and this
+/// build allows several windows — refuse until every other instance is gone.
+pub fn update_install_ready() -> Result<(), String> {
+    let own = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "opencode-launcher.exe".to_string());
+    let out = run("tasklist.exe", &["/FI", &format!("IMAGENAME eq {}", own), "/FO", "CSV", "/NH"]);
+    let others = out.lines().filter(|l| l.to_lowercase().contains(&own.to_lowercase())).count();
+    if others > 1 {
+        Err("检测到其他启动器窗口还在运行，请先关闭它们再安装更新".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 /* ----------------------------------------------------------------- cleanup --- */
@@ -2833,5 +3110,73 @@ mod tests {
         assert_eq!(db.query_row("SELECT count(*) FROM project", [], |r| r.get::<_, i64>(0)).unwrap(), 3);
         let _ = db.close();
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_newer_compares_numerically() {
+        assert!(version_newer("1.2.0", "1.1.1"));
+        assert!(version_newer("v1.10.0", "1.9.0"), "10 必须大于 9，不能按字符串比");
+        assert!(!version_newer("1.1.1", "1.1.1"));
+        assert!(!version_newer("1.0.9", "1.1.0"));
+        assert!(!version_newer("1.2.0-beta", "1.2.0"), "预发布后缀不参与比较");
+        assert!(version_newer("2.0.0", "1.99.99"));
+    }
+
+    #[test]
+    fn pick_recent_prefers_freshest_session_then_newest_add() {
+        let projects = vec![
+            Project { path: "D:/old".into(), name: "old".into(), added_at: 100 },
+            Project { path: "D:/stale".into(), name: "stale".into(), added_at: 500 },
+            Project { path: "d:/ACTIVE".into(), name: "active".into(), added_at: 200 },
+        ];
+        let mut latest = std::collections::HashMap::new();
+        latest.insert(path_key("D:/old"), 1000.0);
+        latest.insert(path_key("D:/active"), 2000.0);
+        let pick = pick_recent(&projects, &latest).unwrap();
+        assert_eq!(pick.path, "d:/ACTIVE", "会话最新更新的项目获胜（大小写/斜杠归一命中）");
+
+        let none = std::collections::HashMap::new();
+        let pick2 = pick_recent(&projects, &none).unwrap();
+        assert_eq!(pick2.path, "D:/stale", "都没有会话时按最近添加获胜");
+
+        // 只有部分项目有会话：有会话的压过没有会话的，即使它是更早添加的。
+        let mut partial = std::collections::HashMap::new();
+        partial.insert(path_key("D:/old"), 1.0);
+        assert_eq!(pick_recent(&projects, &partial).unwrap().path, "D:/old");
+    }
+
+    #[test]
+    fn update_asset_picks_the_light_setup() {
+        let payload = json!({
+            "tag_name": "v9.9.9",
+            "assets": [
+                {"id": 111, "name": "opencode-launcher-setup-9.9.9.exe", "browser_download_url": "https://x/desktop.exe", "size": 87_000_000},
+                {"id": 222, "name": "opencode-launcher-light-setup.exe", "browser_download_url": "https://x/light.exe", "size": 1_800_000}
+            ]
+        });
+        let (tag, url, size, id) = update_asset(&payload).unwrap();
+        assert_eq!(tag, "9.9.9");
+        assert_eq!(url, "https://x/light.exe");
+        assert_eq!(size, 1_800_000);
+        assert_eq!(id, 222);
+
+        let desktop_only = json!({
+            "tag_name": "v2.0.0",
+            "assets": [{"id": 1, "name": "opencode-launcher-setup-2.0.0.exe", "browser_download_url": "u", "size": 1}]
+        });
+        assert!(update_asset(&desktop_only).is_none(), "没有轻量版资产的 Release 不可选");
+    }
+
+    #[test]
+    fn pe_check_reads_the_mz_header() {
+        let dir = std::env::temp_dir().join(format!("oc-pe-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let good = dir.join("good.exe");
+        fs::write(&good, b"MZ\x90\x00rest-of-a-pe").unwrap();
+        let html = dir.join("page.exe");
+        fs::write(&html, b"<!DOCTYPE html>captive portal").unwrap();
+        assert!(is_pe_file(&good));
+        assert!(!is_pe_file(&html));
+        let _ = fs::remove_dir_all(&dir);
     }
 }
