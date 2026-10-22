@@ -281,10 +281,11 @@ handle("kill", async () => {
 
 handle("running:count", async () => {
   const list = await core.listLaunches().catch(() => []);
-  // The built-in web window keeps the service busy, so it counts as running
-  // even though no terminal pane was spawned for it.
-  const web = !!(webWin && !webWin.isDestroyed());
-  return { count: list.length + (web ? 1 : 0), sessions: list, web };
+  const webWinOpen = !!(webWin && !webWin.isDestroyed());
+  // An open window is not a running service: if opencode died while the window
+  // stayed open, the page can only show "Failed to fetch". Ask the service.
+  const web = webWinOpen ? await core.webAlive().catch(() => false) : false;
+  return { count: list.length + (web ? 1 : 0), sessions: list, web, webWin: webWinOpen };
 });
 
 /* ----- sessions ----- */
@@ -423,13 +424,22 @@ async function primeWebSession(link, base, ses) {
  *
  * Returns true when a new window was created.
  */
-async function openWebWindow(link, base, dirs) {
+async function openWebWindow(link, base, dirs, reload) {
   const script = core.webSeedScript(dirs);
 
   if (webWin && !webWin.isDestroyed()) {
     webWin.show();
     webWin.focus();
-    if (script) webWin.webContents.executeJavaScript(script, true).catch(() => {});
+    if (reload) {
+      // The service had been down, so this page is a dead shell — reload it
+      // once it can talk to the backend again, then top up the project list.
+      webWin.webContents.once("did-finish-load", () => {
+        if (script) webWin.webContents.executeJavaScript(script, true).catch(() => {});
+      });
+      webWin.webContents.reload();
+    } else if (script) {
+      webWin.webContents.executeJavaScript(script, true).catch(() => {});
+    }
     return false;
   }
 
@@ -499,7 +509,7 @@ handle("web:open_app", async () => {
   // library, and library entries the service dropped disappear from it.
   const sync = await core.syncProjectRegistry().catch(() => null);
   const dirs = await core.webSeedDirs().catch(() => []);
-  const created = await openWebWindow(open.url, open.base, dirs);
+  const created = await openWebWindow(open.url, open.base, dirs, open.started);
   return {
     ok: true,
     url: open.base,

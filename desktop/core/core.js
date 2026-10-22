@@ -2061,6 +2061,12 @@ async function deleteProject(id, dbPathOverride) {
 }
 
 /**
+ * Last URL the service reported, so a liveness check costs one HTTP request
+ * instead of spawning `opencode service status` every time.
+ */
+let cachedWebUrl = "";
+
+/**
  * URL of the running opencode background service, if any.
  */
 async function webServiceUrl() {
@@ -2069,7 +2075,31 @@ async function webServiceUrl() {
   const r = await opencodeExec(["service", "status"], { timeout: 15000 });
   const out = `${r.stdout || ""}\n${r.stderr || ""}`;
   const m = out.match(/https?:\/\/[^\s"']+/);
-  return m ? m[0].replace(/\/+$/, "") : "";
+  const url = m ? m[0].replace(/\/+$/, "") : "";
+  cachedWebUrl = url;
+  return url;
+}
+
+/**
+ * Is the service actually answering?
+ *
+ * "The built-in window is open" is not the same as "opencode is running": if
+ * the service dies while the window stays open, the page turns into a dead
+ * shell and every request fails with `Failed to fetch`. Ask over HTTP instead
+ * of trusting the window, with a short timeout so the status chip stays snappy.
+ */
+async function webAlive() {
+  const url = cachedWebUrl || (await webServiceUrl());
+  if (!url) return false;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    // The service is password protected: the app shell answers 200 and the
+    // bare API answers 401. Anything that came back means it is listening.
+    return res.status > 0;
+  } catch {
+    cachedWebUrl = "";
+    return false;
+  }
 }
 
 /**
@@ -3365,6 +3395,7 @@ module.exports = {
   webServiceUrl,
   webStart,
   webStatus,
+  webAlive,
   webPairLink,
   webOpenUrl,
   webRegisterProject,

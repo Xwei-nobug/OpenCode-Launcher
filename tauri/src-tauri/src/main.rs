@@ -278,10 +278,16 @@ fn running_count(app: AppHandle) -> Value {
         .into_iter()
         .map(|s| json!({ "script": s.script, "pids": [s.pane_pid], "windowPid": s.window_pid }))
         .collect();
-    // The built-in web window keeps the service busy, so it counts as running
-    // even though no terminal pane was spawned for it.
-    let web = app.get_webview_window("opencode-web").is_some();
-    json!({ "count": list.len() + usize::from(web), "sessions": list, "web": web })
+    // An open window is not a running service: if opencode died while the
+    // window stayed open, the page can only show "Failed to fetch".
+    let web_win = app.get_webview_window("opencode-web").is_some();
+    let web = web_win && core::web_alive();
+    json!({
+        "count": list.len() + usize::from(web),
+        "sessions": list,
+        "web": web,
+        "webWin": web_win,
+    })
 }
 
 /* --------------------------------------------------------------- sessions --- */
@@ -410,7 +416,18 @@ async fn web_open_app(app: AppHandle) -> Value {
 
     if let Some(w) = app.get_webview_window("opencode-web") {
         let dirs = core::web_seed_dirs();
-        let _ = w.eval(&core::web_seed_script(&dirs));
+        let started = r.get("started").and_then(|v| v.as_bool()).unwrap_or(false);
+        if started {
+            // The service had been down, so this page is a dead shell — reload
+            // it, then top up the project list once the new page is ready.
+            let script = core::web_seed_script(&dirs);
+            let _ = w.eval(&format!(
+                "location.reload(); setTimeout(function(){{ {} }}, 1500);",
+                script
+            ));
+        } else {
+            let _ = w.eval(&core::web_seed_script(&dirs));
+        }
         let _ = w.show();
         let _ = w.set_focus();
         return json!({

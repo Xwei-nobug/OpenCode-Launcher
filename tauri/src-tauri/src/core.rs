@@ -850,6 +850,31 @@ pub fn web_service_url() -> Option<String> {
     None
 }
 
+/// Is the service actually listening?
+///
+/// An open webview window is not the same as a running service: if opencode
+/// dies while the window stays open, the page can only show "Failed to fetch".
+/// A TCP connect to the reported port answers that in milliseconds.
+pub fn web_alive() -> bool {
+    let Some(url) = web_service_url() else {
+        return false;
+    };
+    let rest = url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host_port = rest.split('/').next().unwrap_or("");
+    let addr = if host_port.contains(':') {
+        host_port.to_string()
+    } else {
+        format!("{}:80", host_port)
+    };
+    let sock: std::net::SocketAddr = match addr.parse() {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    std::net::TcpStream::connect_timeout(&sock, std::time::Duration::from_millis(1200)).is_ok()
+}
+
 /// A one-time sign-in link for the web UI.
 ///
 /// The background service is password protected: opening its bare root URL
