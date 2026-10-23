@@ -124,9 +124,8 @@ npm run dist           # 打包 -> desktop/dist/
 ### 发布
 
 ```bash
-node scripts/publish-release.mjs v1.1.1 --notes docs/release-notes-v1.1.1.md \
-  tauri/dist/opencode-launcher-setup.exe:opencode-launcher-light-setup.exe \
-  desktop/dist/opencode-launcher-setup-1.1.1.exe
+node scripts/publish-release.mjs v1.1.2 --notes docs/release-notes-v1.1.2.md \
+  tauri/dist/opencode-launcher-setup.exe:opencode-launcher-light-setup.exe
 ```
 
 Token 由本机 git 凭据管理器提供,同名资产会被替换,脚本可重复执行。`node scripts/list-releases.mjs` 列出各版本及资产。

@@ -2405,7 +2405,7 @@ dependencies = [
 
 [[package]]
 name = "opencode-launcher"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "chrono",
  "rusqlite",
