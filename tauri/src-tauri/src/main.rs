@@ -462,6 +462,12 @@ async fn web_open_app(app: AppHandle) -> Value {
     .title("opencode Web")
     .inner_size(1280.0, 900.0)
     .min_inner_size(920.0, 620.0)
+    // wry replaces WebView2's own drop handler with tao's OLE target, which
+    // swallows external drags before the page can see them — so dropping a
+    // file onto the chat input never fired the page's HTML5 drop events.
+    .disable_drag_drop_handler()
+    // Same IME re-anchor guard the main window loads, for the web page.
+    .initialization_script(include_str!("../../renderer/ime-anchor.js"))
     .on_page_load(move |webview, payload| {
         if payload.event() != tauri::webview::PageLoadEvent::Finished {
             return;

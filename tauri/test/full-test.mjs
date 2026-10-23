@@ -479,6 +479,33 @@ await page.waitForTimeout(250);
 const killCall = await page.evaluate(() => window.__calls.filter((c) => c.cmd === "kill").length);
 check("关闭调用 kill", killCall > 0);
 
+/* 11. ime-anchor guard ----------------------------------------------------- */
+const ime = await page.evaluate(
+  () =>
+    new Promise((resolve) => {
+      const input = document.createElement("input");
+      document.body.appendChild(input);
+      input.focus();
+      let blurred = 0;
+      let focused = 0;
+      input.addEventListener("blur", () => blurred++);
+      input.addEventListener("focus", () => focused++);
+      window.dispatchEvent(new Event("resize"));
+      setTimeout(() => {
+        const r = {
+          guard: !!window.__imeAnchorGuard,
+          blurred,
+          focused,
+          active: document.activeElement === input,
+        };
+        input.remove();
+        resolve(r);
+      }, 400);
+    })
+);
+check("IME 重锚护栏已加载（仅 Windows 生效）", ime.guard === true);
+check("窗口缩放后重锚焦点（blur → 延迟 → focus 回来）", ime.blurred === 1 && ime.focused === 1 && ime.active === true, JSON.stringify(ime));
+
 /* wrap up ---------------------------------------------------------------- */
 await browser.close();
 
