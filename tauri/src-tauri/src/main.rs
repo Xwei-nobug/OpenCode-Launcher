@@ -462,12 +462,9 @@ async fn web_open_app(app: AppHandle) -> Value {
     .title("opencode Web")
     .inner_size(1280.0, 900.0)
     .min_inner_size(920.0, 620.0)
-    // wry replaces WebView2's own drop handler with tao's OLE target, which
-    // swallows external drags before the page can see them — so dropping a
-    // file onto the chat input never fired the page's HTML5 drop events.
-    .disable_drag_drop_handler()
-    // Same IME re-anchor guard the main window loads, for the web page.
-    .initialization_script(include_str!("../../renderer/ime-anchor.js"))
+    // Keep wry's native OLE drop handler: it gives us the real Windows paths.
+    // on_window_event below splits dirs (→ @path text) from files (→ synthesized
+    // drop with real bytes so opencode shows its icon attachment).
     .on_page_load(move |webview, payload| {
         if payload.event() != tauri::webview::PageLoadEvent::Finished {
             return;
@@ -476,6 +473,13 @@ async fn web_open_app(app: AppHandle) -> Value {
         if payload.url().as_str().contains("/auth/connect/") {
             return;
         }
+        // External pages don't get initialization_script / __TAURI__, so inject
+        // the IME guard through eval — the same channel that makes web-seed work.
+        // opencode is an SPA: internal navigation replaces the JS context, so
+        // re-inject the guard on EVERY finished load (it is idempotent).
+        let _ = webview.eval(include_str!("../../renderer/ime-anchor.js"));
+        let _ = webview.eval(include_str!("../../renderer/folder-drop.js"));
+        // Web-seed must run only once (it reloads the page); keep the guard.
         if done_in.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return;
         }
@@ -613,10 +617,104 @@ fn updater_install(app: AppHandle) -> Value {
     json!({ "ok": true })
 }
 
+/// Guess a MIME type from a file extension (enough for opencode's attachment UI).
+fn mime_for_path(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "txt" | "md" | "log" | "csv" | "json" | "yaml" | "yml" => "text/plain",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "ts" | "tsx" | "jsx" => "text/javascript",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "mp4" => "video/mp4",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Build the payload for the Web page: directories stay as @path text entries,
+/// files carry their real bytes (base64) so the page can synthesize a drop and
+/// let opencode show its normal icon attachment.
+fn drop_payload_json(paths: &[std::path::PathBuf]) -> String {
+    let mut dirs: Vec<String> = Vec::new();
+    let mut files: Vec<Value> = Vec::new();
+    // Guard against huge files blowing up the eval string / memory.
+    const MAX_FILE: u64 = 32 * 1024 * 1024;
+    for p in paths {
+        if p.is_dir() {
+            dirs.push(p.to_string_lossy().to_string());
+        } else if p.is_file() {
+            match std::fs::metadata(p) {
+                Ok(m) if m.len() <= MAX_FILE => {
+                    match std::fs::read(p) {
+                        Ok(bytes) => {
+                            let name = p.file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "file".into());
+                            files.push(json!({
+                                "name": name,
+                                "mime": mime_for_path(p),
+                                "b64": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes),
+                            }));
+                        }
+                        Err(e) => core::log(&format!("[drop] read file failed {}: {}", p.display(), e)),
+                    }
+                }
+                Ok(m) => {
+                    // Too large: fall back to a path reference rather than fail.
+                    let _ = m;
+                    dirs.push(p.to_string_lossy().to_string());
+                }
+                Err(e) => core::log(&format!("[drop] metadata failed {}: {}", p.display(), e)),
+            }
+        }
+    }
+    json!({ "dirs": dirs, "files": files }).to_string()
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        // WebviewWindow built as window content receives DragDrop as a
+        // SYNTHESIZED WindowEvent (not WebviewEvent) on Windows.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                if window.label() != "opencode-web" { return; }
+                let payload = drop_payload_json(paths);
+                core::log(&format!("[drop] Drop n={} payload_bytes={}", paths.len(), payload.len()));
+                if let Some(webview) = window.webviews().first() {
+                    // Re-define the handler in the SAME eval (the SPA wipes it on
+                    // navigation), call it, and read diagnostics back in one shot.
+                    let js = format!(concat!(
+                        "if(!window.__opencodeNativeDrop){{{src}}}",
+                        "(function(){{var r='NOFN';try{{window.__opencodeNativeDrop({p});r='OK';}}",
+                        "catch(e){{r='THROW:'+e;}}var d=[];try{{d=(window.__dropDiag||[]).slice();",
+                        "window.__dropDiag=[];}}catch(e){{}}return r+' | '+JSON.stringify(d);}})()"
+                    ), src = include_str!("../../renderer/folder-drop.js"), p = payload);
+                    match webview.eval_with_callback(js, |res| {
+                        core::log(&format!("[drop] FRONT {}", res));
+                    }) {
+                        Ok(()) => {}
+                        Err(e) => core::log(&format!("[drop] eval failed: {}", e)),
+                    }
+                }
+            }
+        })
         .setup(|_app| {
             core::cleanup_run_scripts();
             core::log(&format!("app start version={} (tauri)", core::BUILD));

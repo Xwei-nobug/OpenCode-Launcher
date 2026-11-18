@@ -19,6 +19,11 @@
  * 做法：窗口尺寸稳定后（防抖）把当前可编辑元素重锚一次——blur、等 60ms、
  * focus 回来，还原选区与滚动位置。输入法合成中不打断（等 compositionend
  * 再补做）。修复方案参考 lanmark 项目的 ime-anchor 实测（MIT）。
+ *
+ * v2: 同样丢 caret 布局的场景不止 resize。窗口失焦再聚焦、页面被切到后台
+ * 再回来、用户在输入框之间跳转，Web 窗口的 TSF 也会失效，表现为"打着字
+ * 突然失焦 / 候选框跑到左上角"。这些时刻同样做一次重锚。关键纪律不变：
+ * 合成中不打断，只重锚**当前真正聚焦**的可编辑元素，blur→60ms→focus。
  */
 (function () {
   "use strict";
@@ -30,6 +35,9 @@
   var focusTimer = 0;
   var composing = false;
   var pending = false;
+  var lastAnchor = 0;
+  // 失焦回来后不要对同一次点击重复重锚，否则打字会被反复打断。
+  var MIN_GAP_MS = 700;
 
   function isEditable(el) {
     if (!el || el === document.body) return false;
@@ -49,9 +57,12 @@
     return out;
   }
 
-  function reanchor() {
+  function reanchor(minGap) {
+    var now = Date.now();
+    if (minGap && now - lastAnchor < minGap) return;
     var el = document.activeElement;
     if (!isEditable(el)) return;
+    lastAnchor = now;
     var sel = window.getSelection();
     // clone：原 Range 会随 blur 后的选区变化被改写
     var range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
@@ -82,7 +93,7 @@
     }, FOCUS_DELAY_MS);
   }
 
-  function schedule() {
+  function schedule(minGap) {
     clearTimeout(timer);
     timer = setTimeout(function () {
       timer = 0;
@@ -90,7 +101,7 @@
         pending = true;
         return;
       }
-      reanchor();
+      reanchor(minGap);
     }, DEBOUNCE_MS);
   }
 
@@ -102,8 +113,16 @@
       schedule();
     }
   }, true);
-  window.addEventListener("resize", schedule);
+  window.addEventListener("resize", function () { schedule(0); });
+
+  // 窗口失焦/聚焦与页面前后台切换：Web 窗口的 TSF 在这些时刻同样会丢布局。
+  // 只在"重新可见且确实有输入框聚焦"时重锚，并用 MIN_GAP_MS 防止抖动。
+  window.addEventListener("focus", function () { schedule(MIN_GAP_MS); });
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) schedule(MIN_GAP_MS);
+  });
 
   // 供功能测试确认护栏已装上
   window.__imeAnchorGuard = true;
+  window.__imeAnchorReanchor = reanchor;
 })();

@@ -506,6 +506,45 @@ const ime = await page.evaluate(
 check("IME 重锚护栏已加载（仅 Windows 生效）", ime.guard === true);
 check("窗口缩放后重锚焦点（blur → 延迟 → focus 回来）", ime.blurred === 1 && ime.focused === 1 && ime.active === true, JSON.stringify(ime));
 
+// 11b. drop splitter: dirs -> @path text, files -> synthesized drop --------
+await page.addScriptTag({
+  path: new URL("../renderer/folder-drop.js", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
+});
+const fd = await page.evaluate(() => {
+  const input = document.createElement("textarea");
+  document.body.appendChild(input);
+  input.focus();
+  window.__opencodeNativeDrop({ dirs: ["D:\\AgentWork\\demo", "D:\\Agent Work\\my folder"], files: [] });
+  const v = input.value;
+  input.remove();
+  return { guard: !!window.__folderDropGuard, hasEntry: typeof window.__opencodeNativeDrop === "function", value: v };
+});
+check("拖放分流入口已暴露", fd.guard === true && fd.hasEntry === true, JSON.stringify(fd));
+check("文件夹转成 @路径文本（含空格加引号）",
+  fd.value.indexOf("@D:\\AgentWork\\demo") >= 0 &&
+  fd.value.indexOf('@"D:\\Agent Work\\my folder"') >= 0,
+  JSON.stringify(fd));
+
+// files: synthesize a real File + drop event that the app's onDrop can read.
+const fdFile = await page.evaluate(async () => {
+  const input = document.createElement("textarea");
+  document.body.appendChild(input);
+  input.focus();
+  let seen = null;
+  input.addEventListener("drop", (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) seen = { name: f.name, type: f.type, size: f.size };
+  });
+  // "hello" in base64
+  window.__opencodeNativeDrop({ dirs: [], files: [{ name: "a.txt", mime: "text/plain", b64: "aGVsbG8=" }] });
+  await new Promise((r) => setTimeout(r, 50));
+  input.remove();
+  return seen;
+});
+check("单文件合成 drop 事件带真实文件内容",
+  fdFile && fdFile.name === "a.txt" && fdFile.type === "text/plain" && fdFile.size === 5,
+  JSON.stringify(fdFile));
+
 /* wrap up ---------------------------------------------------------------- */
 await browser.close();
 
